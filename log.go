@@ -1,3 +1,7 @@
+// Package lol (log of location) is a simple logging library that prints a high
+// precision unix timestamp and the source location of a log print to make
+// tracing errors simpler. Includes a set of logging levels and the ability to
+// filter out higher log levels for a more quiet output.
 package lol
 
 import (
@@ -5,47 +9,12 @@ import (
 	"io"
 	"os"
 	"runtime"
-	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/gookit/color"
-	"go.uber.org/atomic"
+	"github.com/fatih/color"
 )
-
-var l = GetStd()
-
-func GetStd() (ll *Log) {
-	ll, _ = New(os.Stdout)
-	return
-}
-
-func init() {
-	switch strings.ToUpper(os.Getenv("GODEBUG")) {
-	case "1", "TRUE", "ON":
-		SetLogLevel(Debug)
-		l.D.Ln("printing logs at this level and lower")
-	case "INFO":
-		SetLogLevel(Info)
-	case "DEBUG":
-		SetLogLevel(Debug)
-		l.D.Ln("printing logs at this level and lower")
-	case "TRACE":
-		SetLogLevel(Trace)
-		l.T.Ln("printing logs at this level and lower")
-	case "WARN":
-		SetLogLevel(Warn)
-	case "ERROR":
-		SetLogLevel(Error)
-	case "FATAL":
-		SetLogLevel(Fatal)
-	case "0", "OFF", "FALSE":
-		SetLogLevel(Off)
-	default:
-		SetLogLevel(Info)
-	}
-
-}
 
 const (
 	Off = iota
@@ -57,24 +26,36 @@ const (
 	Trace
 )
 
-type (
-	// LevelPrinter defines a set of terminal printing primitives that output with
-	// extra data, time, log logLevelList, and code location
+var LevelNames = []string{
+	"off",
+	"fatal",
+	"error",
+	"warn",
+	"info",
+	"debug",
+	"trace",
+}
 
-	// Ln prints lists of interfaces with spaces in between
+type (
+	// LevelPrinter defines a set of terminal printing primitives that output
+	// with extra data, time, log logLevelList, and code location
+
+	// Ln prints lists of server with spaces in between
 	Ln func(a ...interface{})
-	// F prints like fmt.Println surrounded by log details
+	// F prints like fmt.Println surrounded []byte log details
 	F func(format string, a ...interface{})
-	// S prints a spew.Sdump for an interface slice
+	// S prints a spew.Sdump for an enveloper slice
 	S func(a ...interface{})
-	// C accepts a function so that the extra computation can be avoided if it is
-	// not being viewed
+	// C accepts a function so that the extra computation can be avoided if it is not being
+	// viewed
 	C func(closure func() string)
 	// Chk is a shortcut for printing if there is an error, or returning true
 	Chk func(e error) bool
-	// Err is a pass-through function that uses fmt.Errorf to construct an error
-	// and returns the error after printing it to the log
-	Err          func(format string, a ...interface{}) error
+	// Err is a pass-through function that uses fmt.Errorf to construct an error and returns the
+	// error after printing it to the log
+	Err func(format string, a ...any) error
+
+	// LevelPrinter is the set of log printers on each log level.
 	LevelPrinter struct {
 		Ln
 		F
@@ -83,10 +64,12 @@ type (
 		Chk
 		Err
 	}
+
+	// LevelSpec is the name, ID and Colorizer for a log level.
 	LevelSpec struct {
 		ID        int
 		Name      string
-		Colorizer func(a ...interface{}) string
+		Colorizer func(a ...any) string
 	}
 
 	// Entry is a log entry to be printed as json to the log file
@@ -100,33 +83,98 @@ type (
 )
 
 var (
-	// sep is just a convenient shortcut for this very longwinded expression
-	sep          = string(os.PathSeparator)
-	currentLevel = atomic.NewInt32(Info)
-	// writer can be swapped out for any io.*writer* that you want to use instead of
-	// stdout.
-	writer io.Writer = os.Stderr
+	// Writer can be swapped out for any io.*Writer* that you want to use instead of stdout.
+	Writer io.Writer = os.Stderr
+
 	// LevelSpecs specifies the id, string name and color-printing function
 	LevelSpecs = []LevelSpec{
-		{Off, "   ", color.Bit24(0, 0, 0, false).Sprint},
-		{Fatal, "FTL", color.Bit24(128, 0, 0, false).Sprint},
-		{Error, "ERR", color.Bit24(255, 0, 0, false).Sprint},
-		{Warn, "WRN", color.Bit24(0, 255, 0, false).Sprint},
-		{Info, "INF", color.Bit24(255, 255, 0, false).Sprint},
-		{Debug, "DBG", color.Bit24(0, 125, 255, false).Sprint},
-		{Trace, "TRC", color.Bit24(125, 0, 255, false).Sprint},
+		{Off, "", NoSprint},
+		{Fatal, "FTL", color.New(color.BgRed, color.FgHiWhite).Sprint},
+		{Error, "ERR", color.New(color.FgHiRed).Sprint},
+		{Warn, "WRN", color.New(color.FgHiYellow).Sprint},
+		{Info, "INF", color.New(color.FgHiGreen).Sprint},
+		{Debug, "DBG", color.New(color.FgHiBlue).Sprint},
+		{Trace, "TRC", color.New(color.FgHiMagenta).Sprint},
 	}
 )
+
+// NoSprint is a noop for sprint (it returns nothing no matter what is given to it).
+func NoSprint(_ ...any) string { return "" }
 
 // Log is a set of log printers for the various Level items.
 type Log struct {
 	F, E, W, I, D, T LevelPrinter
 }
 
+// Check is the set of log levels for a Check operation (prints an error if the error is not
+// nil).
 type Check struct {
 	F, E, W, I, D, T Chk
 }
 
+// Errorf prints an error that is also returned as an error, so the error is logged at the site.
+type Errorf struct {
+	F, E, W, I, D, T Err
+}
+
+// Logger is a collection of things that creates a logger, including levels.
+type Logger struct {
+	*Log
+	*Check
+	*Errorf
+}
+
+// Level is the level that the logger is printing at.
+var Level atomic.Int32
+
+// Main is the main logger.
+var Main = &Logger{}
+
+func init() {
+	// Main = &Logger{}
+	Main.Log, Main.Check, Main.Errorf = New(os.Stderr, 2)
+	ll := os.Getenv("LOG_LEVEL")
+	if ll == "" {
+		SetLogLevel("info")
+	} else {
+		for i := range LevelNames {
+			if ll == LevelNames[i] {
+				SetLoggers(i)
+				return
+			}
+		}
+		SetLoggers(Info)
+	}
+}
+
+// SetLoggers configures a log level.
+func SetLoggers(level int) {
+	Main.Log.T.F("log level %s", LevelSpecs[level].Colorizer(LevelNames[level]))
+	Level.Store(int32(level))
+}
+
+// GetLogLevel returns the log level number of a string log level.
+func GetLogLevel(level string) (i int) {
+	for i = range LevelNames {
+		if level == LevelNames[i] {
+			return i
+		}
+	}
+	return Info
+}
+
+// SetLogLevel sets the log level of the logger.
+func SetLogLevel(level string) {
+	for i := range LevelNames {
+		if level == LevelNames[i] {
+			SetLoggers(i)
+			return
+		}
+	}
+	SetLoggers(Trace)
+}
+
+// JoinStrings joins together anything into a set of strings with space separating the items.
 func JoinStrings(a ...any) (s string) {
 	for i := range a {
 		s += fmt.Sprint(a[i])
@@ -137,78 +185,124 @@ func JoinStrings(a ...any) (s string) {
 	return
 }
 
-func GetPrinter(l int32, writer io.Writer) LevelPrinter {
+var msgCol = color.New(color.FgBlue).Sprint
+
+// GetPrinter returns a full logger that writes to the provided io.Writer.
+func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
 	return LevelPrinter{
 		Ln: func(a ...interface{}) {
-			fmt.Fprintf(writer,
-				"%s %s %s %s\n",
-				UnixNanoAsFloat(),
+			if Level.Load() < l {
+				return
+			}
+			_, _ = fmt.Fprintf(
+				writer,
+				"%s%s %s %s\n",
+				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				JoinStrings(a...),
-				GetLoc(2),
+				msgCol(GetLoc(skip)),
 			)
 		},
 		F: func(format string, a ...interface{}) {
-			fmt.Fprintf(writer,
-				"%s %s %s %s\n",
-				UnixNanoAsFloat(),
+			if Level.Load() < l {
+				return
+			}
+			_, _ = fmt.Fprintf(
+				writer,
+				"%s%s %s %s\n",
+				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				fmt.Sprintf(format, a...),
-				GetLoc(2),
+				msgCol(GetLoc(skip)),
 			)
 		},
 		S: func(a ...interface{}) {
-			fmt.Fprintf(writer,
-				"%s %s %s %s\n",
-				UnixNanoAsFloat(),
+			if Level.Load() < l {
+				return
+			}
+			_, _ = fmt.Fprintf(
+				writer,
+				"%s%s %s %s\n",
+				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				spew.Sdump(a...),
-				GetLoc(2),
+				msgCol(GetLoc(skip)),
 			)
 		},
 		C: func(closure func() string) {
-			fmt.Fprintf(writer,
-				"%s %s %s %s\n",
-				UnixNanoAsFloat(),
+			if Level.Load() < l {
+				return
+			}
+			_, _ = fmt.Fprintf(
+				writer,
+				"%s%s %s %s\n",
+				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				closure(),
-				GetLoc(2),
+				msgCol(GetLoc(skip)),
 			)
 		},
 		Chk: func(e error) bool {
+			if Level.Load() < l {
+				return e != nil
+			}
 			if e != nil {
-				fmt.Fprintf(writer,
-					"%s %s %s %s\n",
-					UnixNanoAsFloat(),
+				_, _ = fmt.Fprintf(
+					writer,
+					"%s%s %s %s\n",
+					msgCol(TimeStamper()),
 					LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 					e.Error(),
-					GetLoc(2),
+					msgCol(GetLoc(skip)),
 				)
 				return true
 			}
 			return false
 		},
 		Err: func(format string, a ...interface{}) error {
-			fmt.Fprintf(writer,
-				"%s %s %s %s\n",
-				UnixNanoAsFloat(),
-				LevelSpecs[l].Colorizer(LevelSpecs[l].Name, " "),
-				fmt.Sprintf(format, a...),
-				GetLoc(2),
-			)
+			if Level.Load() >= l {
+				_, _ = fmt.Fprintf(
+					writer,
+					"%s%s %s %s\n",
+					msgCol(TimeStamper()),
+					LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
+					fmt.Sprintf(format, a...),
+					msgCol(GetLoc(skip)),
+				)
+			}
 			return fmt.Errorf(format, a...)
 		},
 	}
 }
 
-func New(writer io.Writer) (l *Log, c *Check) {
+// GetNullPrinter is a logger that doesn't log.
+func GetNullPrinter() LevelPrinter {
+	return LevelPrinter{
+		Ln:  func(a ...interface{}) {},
+		F:   func(format string, a ...interface{}) {},
+		S:   func(a ...interface{}) {},
+		C:   func(closure func() string) {},
+		Chk: func(e error) bool { return e != nil },
+		Err: func(
+			format string, a ...interface{},
+		) error {
+			return fmt.Errorf(format, a...)
+		},
+	}
+}
+
+// New creates a new logger with all the levels and things.
+func New(writer io.Writer, skip int) (l *Log, c *Check, errorf *Errorf) {
+	if writer == nil {
+		writer = Writer
+	}
 	l = &Log{
-		F: GetPrinter(Fatal, writer),
-		E: GetPrinter(Error, writer),
-		W: GetPrinter(Warn, writer),
-		I: GetPrinter(Info, writer),
-		D: GetPrinter(Debug, writer),
-		T: GetPrinter(Trace, writer),
+		T: GetPrinter(Trace, writer, skip),
+		D: GetPrinter(Debug, writer, skip),
+		I: GetPrinter(Info, writer, skip),
+		W: GetPrinter(Warn, writer, skip),
+		E: GetPrinter(Error, writer, skip),
+		F: GetPrinter(Fatal, writer, skip),
 	}
 	c = &Check{
 		F: l.F.Chk,
@@ -218,38 +312,35 @@ func New(writer io.Writer) (l *Log, c *Check) {
 		D: l.D.Chk,
 		T: l.T.Chk,
 	}
+	errorf = &Errorf{
+		F: l.F.Err,
+		E: l.E.Err,
+		W: l.W.Err,
+		I: l.I.Err,
+		D: l.D.Err,
+		T: l.T.Err,
+	}
 	return
 }
 
-// SetLogLevel sets the log level via a string, which can be truncated down to
-// one character, similar to nmcli's argument processor, as the first letter is
-// unique. This could be used with a linter to make larger command sets.
-func SetLogLevel(l int) {
-	currentLevel.Store(int32(l))
+// TimeStamper generates the timestamp for logs.
+func TimeStamper() (s string) {
+	ts := time.Now().Format("150405.000000")
+	ds := time.Now().Format("2006-01-02")
+	s += color.New(color.FgBlue).Sprint(ds[0:4])
+	s += color.New(color.FgHiBlue).Sprint(ds[5:7])
+	s += color.New(color.FgBlue).Sprint(ds[8:])
+	s += color.New(color.FgHiBlue).Sprint(ts[0:2])
+	s += color.New(color.FgBlue).Sprint(ts[2:4])
+	s += color.New(color.FgHiBlue).Sprint(ts[4:6])
+	s += color.New(color.FgBlue).Sprint(ts[7:])
+	s += " "
+	return
 }
 
-func GetLogLevel() (l int) {
-	return int(currentLevel.Load())
-}
-
-// UnixNanoAsFloat e
-func UnixNanoAsFloat() (s string) {
-	timeText := fmt.Sprint(time.Now().UnixNano())
-	lt := len(timeText)
-	lb := lt + 1
-	var timeBytes = make([]byte, lb)
-	copy(timeBytes[lb-9:lb], timeText[lt-9:lt])
-	timeBytes[lb-10] = '.'
-	lb -= 10
-	lt -= 9
-	copy(timeBytes[:lb], timeText[:lt])
-	return color.Bit24(0, 128, 255, false).Sprint(string(timeBytes))
-}
-
+// GetLoc returns the code location of the caller.
 func GetLoc(skip int) (output string) {
 	_, file, line, _ := runtime.Caller(skip)
-	output = color.Bit24(0, 128, 255, false).Sprint(
-		file, ":", line,
-	)
+	output = fmt.Sprintf("%s:%d", file, line)
 	return
 }
