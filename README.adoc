@@ -1,6 +1,6 @@
 = lol
 
-location of log
+== location of log
 
 This is a very simple, but practical library for logging in applications. Its
 main feature is printing source code locations to make debugging easier.
@@ -9,7 +9,20 @@ to use:
 
 [source,go]
 ----
+package main
+
 import (
 	"lol.mleku.dev"
 )
+
+func main() {
+	err := errorf.E("this is a pretend error")
+	if chk.E(err) {
+		log.E.F("you saw it print the error creating it, checking it, and now here is a log")
+	}
+}
 ----
+
+There are more variants, different error levels, a level setting that can be
+changed while running. See the handy shortcut packages in chk, errorf and log
+for more details.
