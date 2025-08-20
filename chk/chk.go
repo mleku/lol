@@ -2,7 +2,7 @@
 package chk
 
 import (
-	"github.com/mleku/lol"
+	"lol.mleku.dev"
 )
 
 var F, E, W, I, D, T lol.Chk

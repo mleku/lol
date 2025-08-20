@@ -1,4 +1,4 @@
-module github.com/mleku/lol
+module lol.mleku.dev
 
 go 1.25.0
 
