@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/fatih/color"
 )
 
 const (
@@ -89,12 +88,12 @@ var (
 	// LevelSpecs specifies the id, string name and color-printing function
 	LevelSpecs = []LevelSpec{
 		{Off, "", NoSprint},
-		{Fatal, "FTL", color.New(color.BgRed, color.FgHiWhite).Sprint},
-		{Error, "ERR", color.New(color.FgHiRed).Sprint},
-		{Warn, "WRN", color.New(color.FgHiYellow).Sprint},
-		{Info, "INF", color.New(color.FgHiGreen).Sprint},
-		{Debug, "DBG", color.New(color.FgHiBlue).Sprint},
-		{Trace, "TRC", color.New(color.FgHiMagenta).Sprint},
+		{Fatal, "☠️", fmt.Sprint},
+		{Error, "🚨", fmt.Sprint},
+		{Warn, "⚠️", fmt.Sprint},
+		{Info, "ℹ️", fmt.Sprint},
+		{Debug, "🔎", fmt.Sprint},
+		{Trace, "👻", fmt.Sprint},
 	}
 )
 
@@ -185,7 +184,7 @@ func JoinStrings(a ...any) (s string) {
 	return
 }
 
-var msgCol = color.New(color.FgBlue).Sprint
+var msgCol = fmt.Sprint
 
 // GetPrinter returns a full logger that writes to the provided io.Writer.
 func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
@@ -196,7 +195,7 @@ func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
 			}
 			_, _ = fmt.Fprintf(
 				writer,
-				"%s%s %s %s\n",
+				"%s%s%s %s\n",
 				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				JoinStrings(a...),
@@ -209,7 +208,7 @@ func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
 			}
 			_, _ = fmt.Fprintf(
 				writer,
-				"%s%s %s %s\n",
+				"%s%s%s %s\n",
 				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				fmt.Sprintf(format, a...),
@@ -222,7 +221,7 @@ func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
 			}
 			_, _ = fmt.Fprintf(
 				writer,
-				"%s%s %s %s\n",
+				"%s%s%s %s\n",
 				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				spew.Sdump(a...),
@@ -235,7 +234,7 @@ func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
 			}
 			_, _ = fmt.Fprintf(
 				writer,
-				"%s%s %s %s\n",
+				"%s%s%s %s\n",
 				msgCol(TimeStamper()),
 				LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 				closure(),
@@ -249,7 +248,7 @@ func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
 			if e != nil {
 				_, _ = fmt.Fprintf(
 					writer,
-					"%s%s %s %s\n",
+					"%s%s%s %s\n",
 					msgCol(TimeStamper()),
 					LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 					e.Error(),
@@ -263,7 +262,7 @@ func GetPrinter(l int32, writer io.Writer, skip int) LevelPrinter {
 			if Level.Load() >= l {
 				_, _ = fmt.Fprintf(
 					writer,
-					"%s%s %s %s\n",
+					"%s%s%s %s\n",
 					msgCol(TimeStamper()),
 					LevelSpecs[l].Colorizer(LevelSpecs[l].Name),
 					fmt.Sprintf(format, a...),
@@ -325,16 +324,7 @@ func New(writer io.Writer, skip int) (l *Log, c *Check, errorf *Errorf) {
 
 // TimeStamper generates the timestamp for logs.
 func TimeStamper() (s string) {
-	ts := time.Now().Format("150405.000000")
-	ds := time.Now().Format("2006-01-02")
-	s += color.New(color.FgBlue).Sprint(ds[0:4])
-	s += color.New(color.FgHiBlue).Sprint(ds[5:7])
-	s += color.New(color.FgBlue).Sprint(ds[8:])
-	s += color.New(color.FgHiBlue).Sprint(ts[0:2])
-	s += color.New(color.FgBlue).Sprint(ts[2:4])
-	s += color.New(color.FgHiBlue).Sprint(ts[4:6])
-	s += color.New(color.FgBlue).Sprint(ts[7:])
-	s += " "
+	s = fmt.Sprint(time.Now().UnixMicro())
 	return
 }
 
