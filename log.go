@@ -87,13 +87,13 @@ var (
 
 	// LevelSpecs specifies the id, string name and color-printing function
 	LevelSpecs = []LevelSpec{
-		{Off, "", NoSprint},
-		{Fatal, "☠️", fmt.Sprint},
-		{Error, "🚨", fmt.Sprint},
-		{Warn, "⚠️", fmt.Sprint},
-		{Info, "ℹ️", fmt.Sprint},
-		{Debug, "🔎", fmt.Sprint},
-		{Trace, "👻", fmt.Sprint},
+		{Off, " ", NoSprint},
+		{Fatal, "☠️ ", fmt.Sprint},
+		{Error, "🚨 ", fmt.Sprint},
+		{Warn, "⚠️ ", fmt.Sprint},
+		{Info, "ℹ️ ", fmt.Sprint},
+		{Debug, "🔎 ", fmt.Sprint},
+		{Trace, "👻 ", fmt.Sprint},
 	}
 )
 
